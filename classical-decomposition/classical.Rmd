@@ -1,0 +1,148 @@
+---
+title: "Assignment 1 - Problem 2"
+author: "Shivakanth Thudi"
+date: "10/30/2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, tidy = TRUE,comment = "")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff=60))
+```
+
+```{r Initial_Setup, echo=FALSE, include=FALSE}
+# install.packages("car",repos="http://cran.rstudio.com/" )
+library(car)
+library(lmtest)
+```
+
+## Part a - Modeling the trend component
+
+```{r read_data, echo=FALSE}
+sales <- read.table('SALES.txt')
+sales <- ts(sales, start=1999, frequency=12)
+```
+
+
+```{r trend_only}
+plot(sales)
+t <- time(sales) # Extracting time as the explanatory variate
+month <- as.factor(cycle(sales)) # Introducing month as the season
+
+# Model the trend only, as a quadratic
+t2 <- t^2
+reg1 <- lm(sales~t+t2)
+summary(reg1)
+plot(sales)
+# superimpose the fit of model reg1 on the plot of the data
+points(t,predict.lm(reg1),type='l',col='red') 
+```
+
+
+```{r diag_trend_only}
+# Diagnostic plots for reg1 model
+
+# Dividing the plotting page into 4 panels
+par(mfrow=c(2,2)) 
+# Plot of fitted values vs residuals
+residualPlot(reg1, main = "Residuals vs. Fitted Values")
+# qq-plot of residuals
+qqPlot(reg1$residuals, distribution='norm', main='Normal Q-Q Plot', xlab='Empirical Distribution', ylab='Theoretical Distribution')
+# Plotting the residuals vs time
+plot(reg1$residuals, main = "Residuals vs. Time", ylab = "Residuals", xlab = "Time") 
+abline(h = 0, col = "red", lwd = 2) # plotting a horizontal line at 0
+# Sample acf plot of residuals
+acf(reg1$residuals, main = "ACF Plot of Residuals") 
+```
+
+### Model Fit
+The residuals look homoscedastic - we also confirm this with a Breusch-Pagan Test. From the qqplot, we see that the residuals are normally distributed, which we confirm with a Shapiro Wilk test. 
+
+Plotting the residuals against time, we observe that the error terms seem to follow a pattern and this is verified in the ACF plot where we see some significant lag h correlations. This indicates that the OLS assumption of independence of error terms does not hold, and consequently casts doubt on the validity of predictions and prediction intervals that can be made by this model. 
+
+Despite the fact that OLS assumptions were not met, the model has a good fit, with an $R^2$ value of `r round(summary(reg1)$r.squared,2)`. 
+
+## Part b - Classical Decomposition
+
+```{r classical}
+# Model the trend and seasonal components
+reg2 <- lm(sales~t+t2+month)
+summary(reg2) 
+
+plot(sales)
+# superimpose the fit of model reg2 on the plot of the data
+points(t,predict.lm(reg2),type='l',col='red') 
+```
+
+
+```{r diag_classical}
+# Diagnostic plots for reg2 model
+
+# Dividing the plotting page into 4 panels
+par(mfrow=c(2,2)) 
+# Plot of fitted values vs residuals
+residualPlot(reg2, main = "Residuals vs. Fitted Values")
+# qq-plot of residuals
+qqPlot(reg2$residuals, distribution='norm', main='Normal Q-Q Plot', xlab='Empirical Distribution', ylab='Theoretical Distribution')
+# Plotting the residuals vs time
+plot(reg2$residuals, main = "Residuals vs. Time", ylab = "Residuals", xlab = "Time") 
+abline(h = 0, col = "red", lwd = 2) # plotting a horizontal line at 0
+# Sample acf plot of residuals
+acf(reg2$residuals, main = "ACF Plot of Residuals") 
+```
+
+### Model Fit
+
+The model fits much better when we model both the seasonal term and the trend term. The $R^2$ value has increased from `r round(summary(reg1)$r.squared,2)` to `r round(summary(reg2)$r.squared,2)`. 
+
+We look at the residual diagnostics and observe that the OLS assumptions of homoscedasticity and normality are met, but the OLS assumption of independence of error terms is not. Consequently, this casts doubt on the model's ability to make predictions and estimate prediction intervals.
+
+## Part c - Comparison of models
+
+We see that classical decomposition into a trend and seasonal term has significantly improved the model's fit, with an increase in $R^2$ from `r round(summary(reg1)$r.squared,2)` to `r round(summary(reg2)$r.squared,2)`. Thus, adding a seasonal term greatly improved the model's fit. The ACF plot in (a) indicated that there was seasonality not being captured by the model, but after classical decomposition we see in the ACF plot in (b) that this is no longer the case. However, we see significant lag h spikes at h = 1, 2 and 3, which imply that the model still cannot be used for forecasting. 
+
+## Part d - OLS Assumptions
+
+Both models satisifed the OLS assumptions of homoscedasticity and normality, but **failed to satisfy the OLS assumption of independence of the error terms**. We include the BP-tests for homoskedasticity and the Shapiro tests for normality for reference. 
+
+|Model|Breusch-Pagan Test for homoscedasticity|Shapiro-Wilk test for normality |
+|------------------|----------------------|-----------------|
+|Model (a) - Trend only, quadratic term|p-value = `r bptest(reg1)$p.value`|p-value = `r shapiro.test(reg1$residuals)$p.value`|
+|Model (b) - Trend and Seasonal, quadratic term and indicator variables|p-value = `r bptest(reg2)$p.value`|p-value = `r shapiro.test(reg2$residuals)$p.value`|
+
+Since the OLS assumption of independence of error terms was not met, we conclude that predictions and prediction intervals made by these models are not valid. 
+
+## Part e - Predictions
+
+```{r predict}
+#Prediction in Sales data
+
+# Forecasting for Year 2011
+t.new <- seq(2011,2012,length=13)[1:12] 
+t2.new <- t.new^2
+month.new <- factor(rep(1:12,1)) # Introducing the seasonal value for forecasting
+
+# Putting the values for forecasting into a dataframe
+new <- data.frame(t=t.new, t2=t2.new, month=month.new) 
+
+# Computing the prediction as well as the prediction interval
+pred <- predict.lm(reg2,new,interval='prediction')
+
+pred
+
+par(mfrow=c(1,1))
+# Plotting the data
+plot(sales,xlim=c(1999,2012), ylim = c(0,70)) 
+
+# Adding a vertical line at the point where prediction starts
+abline(v=2011,col='blue',lty=2) 
+# Plotting the predictions
+lines(pred[,1]~t.new,type='l',col='red')
+# Plotting lower limit of the prediction interval
+lines(pred[,2]~t.new,col='green') 
+# Plotting upper limit of the  prediction interval
+lines(pred[,3]~t.new,col='green') 
+```
+
+
+

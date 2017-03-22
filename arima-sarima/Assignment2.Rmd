@@ -1,0 +1,397 @@
+---
+title: "Assignment 2"
+author: "Shivakanth Thudi"
+date: "11/16/2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, eval = TRUE, tidy = TRUE,comment = "")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff=60))
+```
+
+```{r Initial_Setup, echo=FALSE, include=FALSE}
+# install.packages("car",repos="http://cran.rstudio.com/" )
+library(car)
+library(lmtest)
+library("tseries")
+library(forecast)
+library(lawstat)
+```
+
+## Problem 1
+
+### Part (a) - Picking d as 1
+
+We look at the original LakeHuron data and see that it is not stationary. The ACF plot indicates slow decay (as opposed to rapid decay), a plot of the time series does not look flat, and an Augmented Dickey-Fuller Test indicates that there is not enough evidence to reject the null hypothesis that the times series is not stationary.
+
+```{r check_stationary, eval=FALSE}
+par(mfrow=c(2,1))
+plot(LakeHuron)
+acf(LakeHuron)
+adf.test(LakeHuron)
+```
+
+After differencing once, we find that the transformed time series is now stationary. In particular, the once differenced plot of the time series looks flat, the ACF plot indicates rapid decay, and the Augmented Dickey Fuller test implies that we can now reject the null hypothesis of non-stationarity, and instead conclude, that the transformed time series is now stationary. Hence we pick the **order of the ordinary differencing as d = 1**.
+
+```{r od_stationary_once}
+dlake_huron <- diff(LakeHuron)
+par(mfrow = c(2,1))
+ts.plot(dlake_huron, main = "Differenced Annual Measurements", ylab = "Level", xlab = "Year")
+acf(dlake_huron, main = "Once Differenced (Ordinary) Measurements")
+```
+
+```{r adf_od_once}
+adf.test(dlake_huron)
+```
+
+### Part(b) - Fitting an AR(1) model with MLE on the once-differenced time series
+
+```{r, echo =TRUE }
+m1 <- arima(x = LakeHuron, order = c(1,1,0), method = "ML")
+# summary(m1)
+```
+
+|Model|Error Variance, $\sigma^2$|Log likelihood|AIC|
+|-------------|------------|------------|--------------|
+|AR(1)|`r m1$sigma2`|`r m1$loglik`|`r m1$aic`|
+
+
+### Part(c) - Fitting an AR(2) model with MLE on the once-differenced time series
+
+```{r, echo = TRUE}
+m2 <- arima(x = LakeHuron, order = c(2,1,0), method = "ML")
+# summary(m2)
+```
+
+
+|Model|Error Variance, $\sigma^2$|Log likelihood|AIC|
+|-------------|------------|------------|--------------|
+|AR(2)|`r m2$sigma2`|`r m2$loglik`|`r m2$aic`|
+
+### Part (d) - Likelihood ratio test comparing the AR(1) and AR(2) models
+
+We choose as our null model the simpler one, with fewer parameters - the AR(1) model. Our alternative model is the one with more parameters - the AR(2) model.
+
+* **Null Hypothesis: The null model AR(1) and the alternative model AR(2) fit equally well**
+* **Alternative Hypothesis: The alternative model AR(2) fits better than the null model AR(1)**
+
+The test statistic is:
+
+\begin{equation}
+D = -2log[\frac{L(null model)}{L(alt model)}]=  -2[l(null model) - l(alt model)]
+\end{equation}
+
+Here, we have:
+
+\begin{equation}
+l(null model) = `r m1$loglik` 
+\end{equation}
+
+\begin{equation}
+l(alt model) = `r m2$loglik` 
+\end{equation}
+
+So the statistic D is:
+
+\begin{equation}
+D = -2[l(null model) - l(alternative model)] = -2[(`r m1$loglik`) - (`r m2$loglik`)] = `r -2*(m1$loglik - m2$loglik)`
+\end{equation}
+
+and 
+
+\begin{equation}
+pval = 1-pchisq(D,1) = `r 1-pchisq(-2*(m1$loglik - m2$loglik),1)`
+\end{equation}
+
+```{r echo=FALSE}
+D = -2*(m1$loglik - m2$loglik)
+pval = 1-pchisq(D,1)
+```
+
+The test statistic is `r round(D,4)` and the corresponding p-value is `r round(pval,4)`. Hence, at the $\alpha$ = 0.05 level, we can **reject the null hypothesis that the null model and alternative models fit equall well**. We conclude that the alternative model, AR(2), fits the once-differenced time series better than the AR(1) model.
+
+\newpage
+
+### Part (e) - Comparison of Models
+
+
+|Model|Error Variance, $\sigma^2$|Log likelihood|AIC|
+|-------------|------------|------------|--------------|
+|AR(1)|`r m1$sigma2`|`r m1$loglik`|`r m1$aic`|
+|AR(2)|`r m2$sigma2`|`r m2$loglik`|`r m2$aic`|
+
+We agree with the likelihood ratio test that the AR(2) model fits the once-differenced data better than the AR(1) model. The error variance, $\sigma^2$, is lower in the AR(2) model, the AIC goes down even after adding another parameter, and the log-likelihood goes up (which was a significant increase according to the likelihood ratio test). We deem that **the AR(2) model is the optimal choice here.**
+
+
+### Part(f) - Residual Diagnostics
+
+```{r}
+# Fit the AR(2) model and extract the residuals
+e <- m2$residuals # residuals
+r <- e/sqrt(m2$sigma2) # standardized residuals
+```
+
+#### Part 1 - Zero-Mean
+
+```{r}
+# Plot these and check whether the true mean is zero
+par(mfrow=c(2,1))
+plot(e, main="Residuals vs t", ylab="")
+abline(h=0, col="red")
+plot(r, main="Standardized Residuals vs t", ylab="")
+abline(h=0, col="red")
+
+t.test(e)
+```
+
+\newpage
+
+We see from the scatter plot that the error terms seem to be **symmetrically scattered around zero**. A **t-test confirms this** suspicion, returning a p-value of 0.996 which means that we have no evidence to reject the null hypothesis that the true mean is zero. The 95 percent confidence interval also contains zero for the mean.
+
+#### Part 2 - Homoscedasticity
+
+```{r, fig.width=6, fig.height=4, echo =TRUE}
+# test for heteroscedasticity
+par(mfrow=c(1,1))
+plot(e, main="Residuals vs t", ylab="")
+abline(v=c(1900,1925, 1950), lwd=3, col="red")
+group <- c(rep(1,25),rep(2,25),rep(3,25),rep(4,23))
+levene.test(e,group) #Levene
+bartlett.test(e,group) #Bartlett
+```
+
+\newpage
+
+We see from the scatter plot of the residuals that the **residuals look homoscedastic**. We confirm this with the Levene test and the Bartlett test, which return **p-values of 0.113 and 0.1149 respectively**. We have no evidence to reject the null hypothesis, and thus we **conclude that the error terms are indeed homoscedastic.**
+
+#### Part 3 - Zero-Correlation
+
+```{r}
+# test for uncorrelatedness / randomness
+tsdiag(m2) 
+```
+
+The ACF plot has **no significant spikes so we can conclude that the error terms are uncorrelated or "zero-correlated"**. **The Ljung-Box test and plot confirms this statistic as the p-values are all above the threshold**, so we can conclude that there is no evidence to reject the null hypothesis that the error terms are uncorrelated at any lag. 
+
+#### Part 4 - Normality
+
+The qq-plot suggests that the **error terms are normally distributed**, so the MLE assumption of normality holds. We **confirm this with the Shapiro-Wilk normality test** which gives a p-value of 0.4492, so we fail to reject the null hypothesis that the error terms are normally distributed. 
+
+```{r, fig.width=4, fig.height=3}
+# test for normality
+par(mfrow=c(1,1))
+qqnorm(e, main="QQ-plot of Residuals")
+qqline(e, col = "red")
+shapiro.test(e) #SW test
+```
+
+\newpage
+
+## Problem 2
+#### Choosing d and D
+
+```{r}
+beer = read.csv('beer.csv', header = TRUE)
+beer <- ts(data = beer, start = c(1956,1), frequency = 12)
+# Check whether ordinary and/or seasonal differencing seems necessary
+par(mfrow=c(2,1))
+plot(beer, main = "Monthly Beer Consumption", ylab = "Consumption", xlab = "Month")
+acf(beer, lag.max = 48, main = "Beer")
+```
+
+We see that the time series is not stationary and we will need to do some differencing. The ACF plot shows slow decay, and a seasonal trend as well. While the Augmented Dickey-Fuller test implied that the original time series was stationary, we chose not to believe this result as the plots indicated that there was non-stationarity (The KPSS test indicated that we needed to difference once, however). We difference once (ordinary) and look at the transformed time-series and ACF plot afterwards:
+
+```{r}
+# Both forms of differencing seem necessary. Let's do ordinary first:
+dbeer <- diff(beer)
+par(mfrow=c(2,1))
+plot(dbeer, main = "Trend Adjusted Monthly Beer Consumption", ylab = "Consumption", xlab = "Month")
+acf(dbeer, lag.max = 48, main = "Beer")
+```
+
+We observe that after ordinary differencing once, the observed time series looks flat. The ACF plot also depicts rapid decay after we difference once, as opposed to slow decay. The ACF plot also indicates that there is seasonality present, due to the recurring nature of the peaks when the lag is 12. So we do seasonal differencing as well.
+
+```{r}
+# Still need seasonal differencing:
+dbeer.12 <- diff(dbeer, lag = 12)
+par(mfrow=c(2,1))
+plot(dbeer.12, main = "Trend and Seasonally Adjusted Monthly Beer Consumption", ylab = "Consumption", xlab = "Month")
+acf(dbeer.12, lag.max = 48, main = "Beer")
+```
+
+After seasonally differencing once, the ACF plot does not indicate that any more seasonal differencing is required. **So we choose the order of the ordinary differencing, d as 1 and the order of the seasonal differencing, D as 1 too.**
+
+#### Choosing p,q,P,and Q 
+
+```{r, echo = TRUE}
+# This seems fine now. Since we seasonally differenced, we are fitting a SARIMA 
+# model and need to choose p, q, P, Q. Let's look at the ACF/PACF plots for this
+par(mfrow=c(2,1))
+acf(dbeer.12, lag.max = 48, main ="Beer")
+pacf(dbeer.12, lag.max = 48, main = "Beer")
+```
+
+We observe that there are are 5 significant spikes in the PACF. Considering seasonal lags separated by 12 (at 1s, 2s, 3s,etc. with s=12), we see 2 spikes. So p might be less than/equal to 5 and P less than/equal to 2. In the ACF, we see 11 significant spikes (can only take q <= s-1 i.e. q <=11), and with seasonal lags separated by 12 we see 1 significant spike. So q might be less than 12, and Q might be less than 1. 
+
+```{r, echo=TRUE}
+# p <= 5, q <= 11, P <= 2, Q <= 1
+
+m1<-arima(beer,order=c(1,1,0),seasonal = list(order = c(1,1,0), period = 12), method = "ML")
+m2<-arima(beer,order=c(1,1,5),seasonal = list(order = c(1,1,0), period = 12), method = "ML")
+m3<-arima(beer,order=c(1,1,11),seasonal = list(order = c(1,1,0), period = 12), method = "ML")
+m4<-arima(beer,order=c(1,1,11),seasonal = list(order = c(2,1,1), period = 12), method = "ML")
+m5<-arima(beer,order=c(5,1,0),seasonal = list(order = c(1,1,0), period = 12), method = "ML")
+
+sigma2<-c(m1$sigma2,m2$sigma2,m3$sigma2,m4$sigma2,m5$sigma2)
+loglik<-c(m1$loglik,m2$loglik,m3$loglik,m4$loglik,m5$loglik)
+AIC<-c(m1$aic,m2$aic,m3$aic,m4$aic,m5$aic)
+d <- data.frame(pq = c("(1,1,0), (1,1,0) [12]","(1,1,5), (1,1,0) [12]","(1,1,11), (1,1,0) [12]","(1,1,11), (2,1,1) [12]","(5,1,0), (1,1,0) [12]"),sigma2,loglik,AIC)
+
+# Order this by loglik
+d[order(-d$loglik),]
+```
+
+While there may be a huge range of models considering the values of p,q, P, and Q we picked, we only look at 5 candidate models.
+
+We observe that model 4, with (p,d,q), (P,D,Q) [s] = "(1,1,11), (2,1,1) [12]", out of the models we considered, seems to be the best in terms of all the metrics - it has the lowest error variance and AIC, and the highest log-likelihood among the candidate models we considered.
+
+#### Residual Diagnostics for Model 4 - The (1,1,11), (2,1,1) [12] model
+
+#### 1) Zero Mean and Zero-Correlation
+
+```{r}
+par(mfrow=c(1,1))
+tsdiag(m4)
+```
+
+The plot of the residuals indicates that the error terms have a zero mean. The ACF plot does not have any significant spikes and the Ljung-Box plot confirms that the error residuals are zero-correlated/uncorrelated since the p-values are all above the threshold.
+
+#### 2) Homoscedasticity
+
+```{r, fig.width=5, fig.height=4}
+plot(m4$residuals, main = "Residuals vs. Time", ylab = "Residuals")
+abline(h = 0, col = "red")
+```
+
+**We see signs of heteroscedasiticy in the plot, and this prompts us to consider log-transforming the original time-series data.**
+
+#### 3) Normality
+
+```{r, fig.width=4, fig.height=3}
+# Residual Diagnostics:
+qqnorm(m4$residuals)
+qqline(m4$residuals, col = "red")
+```
+
+The qqplot indicates non-normality.
+
+**The heteroscedasticity and non-normality issues above prompt us to consider log-transforming the time-series and also fitting it with Least Squares.**
+
+\newpage
+
+## Transformed Log-Model
+
+```{r}
+beer = read.csv('beer.csv', header = TRUE)
+beer <- ts(data = log(beer), start = c(1956,1), frequency = 12)
+# Check whether ordinary and/or seasonal differencing seems necessary
+# par(mfrow=c(2,1))
+# plot(beer, main = "Monthly Beer Consumption", ylab = "Consumption", xlab = "Month")
+# acf(beer, lag.max = 48)
+```
+
+```{r}
+# Both forms of differencing seem necessary. Let's do ordinary first:
+dbeer <- diff(beer)
+# par(mfrow=c(2,1))
+# plot(dbeer, main = "Trend Adjusted Monthly Beer Consumption", ylab = "Consumption", xlab = "Month")
+# acf(dbeer, lag.max = 48, main = "Beer")
+```
+
+```{r}
+# Still need seasonal differencing:
+dbeer.12 <- diff(dbeer, lag = 12)
+par(mfrow=c(1,1))
+plot(dbeer.12, main = "Trend and Seasonally Adjusted \nMonthly Beer (Log-Transformed) Consumption", ylab = "Consumption", xlab = "Month")
+```
+
+**We go through the same steps as before and determine the order of the ordinary differencing, d as 1 and the order of the seasonal differencing, D as 1.**
+
+```{r, echp = TRUE}
+# This seems fine now. Since we seasonally differenced, we are fitting a SARIMA 
+# model and need to choose p, q, P, Q. Let's look at the ACF/PACF plots for this
+par(mfrow=c(2,1))
+acf(dbeer.12, lag.max = 48, main ="Beer")
+pacf(dbeer.12, lag.max = 48, main = "Beer")
+```
+
+ We observe a similar number of spikes as we did previously in both the ACF and PACF plots, and make the same choices for p,q, P and Q as before.
+
+```{r, echo =TRUE}
+# p <= 5, q <= 11, P <= 2, Q <= 1
+
+m1<-arima(beer,order=c(1,1,0),seasonal = list(order = c(1,1,0), period = 12), method = "CSS")
+m2<-arima(beer,order=c(1,1,5),seasonal = list(order = c(1,1,0), period = 12), method = "CSS")
+m3<-arima(beer,order=c(1,1,11),seasonal = list(order = c(1,1,0), period = 12), method = "CSS")
+m4<-arima(beer,order=c(1,1,11),seasonal = list(order = c(2,1,1), period = 12), method = "CSS")
+m5<-arima(beer,order=c(5,1,11),seasonal = list(order = c(1,1,0), period = 12), method = "CSS")
+
+sigma2<-c(m1$sigma2,m2$sigma2,m3$sigma2,m4$sigma2,m5$sigma2)
+loglik<-c(m1$loglik,m2$loglik,m3$loglik,m4$loglik,m5$loglik)
+AIC<-c(m1$aic,m2$aic,m3$aic,m4$aic,m5$aic)
+d <- data.frame(pq = c("(1,1,0), (1,1,0) [12]","(1,1,5), (1,1,0) [12]","(1,1,11), (1,1,0) [12]","(1,1,11), (2,1,1) [12]","(5,1,11), (1,1,0) [12]"),sigma2,loglik,AIC)
+
+# Order this by sigma2
+d[order(d$sigma2),]
+```
+
+We observe that the same model, model 4, with (p,d,q), (P,D,Q) [s] = "(1,1,11), (2,1,1) [12]", was the best out of all candidate models. Since we fit using Least Squares, we use only the metric of error variance here.
+
+\newpage
+
+#### Residual Diagnostics for Model 4 - The (1,1,12), (2,1,1) [12] model (Log-Transformed)
+
+#### 1) Zero Mean and Zero-Correlation
+
+```{r}
+par(mfrow=c(1,1))
+tsdiag(m4)
+```
+
+As before, the plot of the residuals indicates that the error terms have a zero mean. The ACF plot does not have any significant spikes and the Ljung-Box plot confirms that the error residuals are zero-correlated/uncorrelated since the p-values are all above the threshold.
+
+#### 2) Homoscedasticity
+
+```{r, fig.width=5, fig.height=4, echo =TRUE}
+e <- m4$residuals # residuals
+r <- e/sqrt(m4$sigma2) # standardized residuals
+
+par(mfrow=c(1,1))
+plot(e, main="Residuals vs t", ylab="")
+abline(v=c(1966,1976, 1986), lwd=3, col="red")
+group <- c(rep(1,120),rep(2,120),rep(3,120),rep(4,116))
+levene.test(e,group) #Levene
+bartlett.test(e,group) #Bartlett
+```
+
+The error terms **look homoscedastic now, after the log-transformation**. However, when we perform a Levene test and Bartlett test, we end up rejecting the hypothesis that the error terms are homoscedastic. Considering the way we grouped the observations, we observe that the third group has a lot of variation at one observed time point, but that roughly the observations seem to display constant variance. So while there is a discrepancy between the informal diagnostics, and the formal diagnostics (tests), one could still argue that the assumption of homoscedasticity was met. 
+
+\newpage
+
+#### Normality
+
+```{r,fig.width=4, fig.height=3}
+# Residual Diagnostics:
+qqnorm(m4$residuals)
+qqline(m4$residuals, col = "red")
+# test for normality
+shapiro.test(e) #SW test
+```
+
+The qqplot indicates non-normality of the error terms. The Shapiro Test also indicates that the error terms are not normally distributed. However, since we fit the model using Least Squares this time, we do not need to satisfy the assumption of normality.
+
+## Model Validity
+
+While the log-transformed model satisfies the assumptions of zero-mean and zero-correlation, it fails to satisfy the assumptions of homoscedasticity and normality of the error terms. The normality of the error terms should not be an issue since we fit the log-transformed model using the least squares approach in the second iteration. As for the heteroscedasticity issues, I would argue that while the Levene Test and Bartlett Test indicate non-constant variance, the plot of the residuals indicates that the error terms have mostly constant variance. So while it doesnt "rigidly" meet all assumptions, it could still be used to make good predictions and prediction intervals.
+

@@ -1,0 +1,345 @@
+---
+title: "Predicting Bankruptcy Rates Using Time Series Analysis"
+author: "Francisco Calderon, Eric Lehman, Shivakanth Thudi"
+date: "12/05/2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, eval = TRUE, tidy = TRUE,comment = "")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff=60))
+```
+
+```{r Initial_Setup, echo=FALSE, include=FALSE}
+library(car)
+library(lmtest)
+library("tseries")
+library(forecast)
+library(lawstat)
+library(vars)
+```
+
+# Problem Description
+
+The ability to accurately forecast national bankruptcy rates is an important problem in the financial world. This report describes work done to predict Canadian bankruptcy rates from January 2011 to December 2012 using methods of time series forecasting. Specifically, national bankruptcy rates for Canada from January 1987 to December 2010 were used to create models simulating the bankruptcy rates as a function of time. The relationships of the bankruptcy rate to the housing price index, population and unemployment rate were also examined and used where appropriate to create the models.  
+
+The remainder of this report details the methodology used to converge on an optimal model. Appropriate explanation of the theory involved along with a justification of the model selection will be included.
+
+```{r read_data}
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+
+bankr <- ts(data = train$Bankruptcy_Rate, start = c(1987,1), frequency = 12)
+unemp <- ts(data = train$Unemployment_Rate, start = c(1987,1), frequency = 12)
+pop <- ts(data = train$Population, start = c(1987,1), frequency = 12)
+hpi <- ts(data = train$House_Price_Index, start = c(1987,1), frequency = 12)
+
+unemp_fut <- ts(test$Unemployment_Rate, start = c(2011,1), frequency = 12)
+pop_fut <- ts(test$Population, start = c(2011,1), frequency = 12)
+hpi_fut <- ts(test$House_Price_Index, start = c(2011,1), frequency = 12)
+
+# plot(unemp_fut)
+# plot(pop_fut)
+# plot(hpi_fut)
+```
+
+```{r}
+par(mfrow = c(4,1))
+
+plot(bankr,xlim = c(1986, 2013))
+abline(v=2011)
+
+unemp_whole = ts(c(unemp, unemp_fut), start = c(1987,1), frequency = 12)
+plot(unemp_whole, xlim = c(1986, 2013))
+abline(v=2011)
+
+pop_whole = ts(c(pop, pop_fut), start = c(1987,1), frequency = 12)
+plot(pop_whole,xlim = c(1986, 2013))
+abline(v=2011)
+
+hpi_whole = ts(c(hpi, hpi_fut), start = c(1987,1), frequency = 12)
+plot(hpi_whole,xlim = c(1986, 2013))
+abline(v=2011)
+```
+
+&nbsp;
+&nbsp;
+
+```{r plot_bankr, echo = FALSE}
+par(mfrow=c(2,1))
+plot(bankr, main = "Monthly Bankruptcy", xlab = "Month", ylab = "Bankruptcy")
+acf(bankr, lag.max = 24, main = "ACF of Bankruptcy")
+```
+
+
+```{r plot_unemp, eval = FALSE}
+par(mfrow=c(2,1))
+plot(unemp)
+acf(unemp, lag.max = 24, main = "ACF of Unemp")
+```
+
+\pagebreak 
+
+## Part (b) - SARIMA
+
+### Choosing d and D
+Since the time series was not stationary, we will need to do some differencing.  We difference once (ordinary) and look at the transformed time-series and ACF plot afterwards:
+
+```{r}
+for (i in seq(2,12)) {
+  print(nsdiffs(bankr, m=i), test = "c")
+}
+```
+
+
+
+```{r}
+# Both forms of differencing seem necessary. Let's do ordinary first:
+dbankr <- diff(bankr.tr)
+par(mfrow=c(2,1))
+plot(dbankr, main = "Trend Adjusted Monthly Bankruptcy Rates", ylab = "Bankruptcy", xlab = "Month")
+acf(dbankr, lag.max = 48, main = "Bankruptcy")
+```
+
+We observe that after ordinary differencing once, the observed time series looks flat. The ACF plot depicts rapid decay rather than slow decay. The ACF plot also indicates that there is seasonality present, due to the recurring nature of the peaks when the lag is 12. So we do seasonal differencing as well.
+
+```{r}
+# Still need seasonal differencing:
+dbankr.12 <- diff(dbankr, lag = 12)
+par(mfrow=c(2,1))
+plot(dbankr.12, main = "Trend and Seasonally Adjusted Monthly Bankruptcy Rates", ylab = "Bankruptcy Rates in million USD", xlab = "Month")
+acf(dbankr.12, lag.max = 48, main = "Beer")
+```
+
+```{r, eval = FALSE}
+for (i in seq(2,12)) {
+  # print(i) 
+  print(nsdiffs(bankr, m = i), test = c("c"))
+}
+```
+
+After seasonally differencing once, the ACF plot does not indicate that any more seasonal differencing is required. **So we choose the order of the ordinary differencing, d as 1 and the order of the seasonal differencing, D as 1 too.**
+
+## Part (c) - SARIMA + exogenous variable (i.e., the "unemp" time series)
+
+```{r, echo = FALSE}
+# This seems fine now. Since we seasonally differenced, we are fitting a SARIMA 
+# model and need to choose p, q, P, Q. Let's look at the ACF/PACF plots for this
+par(mfrow=c(2,1))
+acf(dbankr.12, lag.max = 24, main ="Exports")
+pacf(dbankr.12, lag.max = 24, main = "Exports")
+```
+
+
+```{r classical_decomp, eval=FALSE}
+t <- time(bankr.tr) # Extracting time as the explanatory variate
+month <- as.factor(cycle(bankr.tr)) # Introducing month as the season
+
+# Model the trend only, as a quadratic
+t2 <- t^2
+u2 <- unemp.tr^2
+p2 <- pop.tr^2
+h2 <- hpi.tr^2
+u2 <- unemp.tr^2
+p2 <- pop.tr^2
+h2 <- hpi.tr^2
+
+
+
+reg1 <- lm(bankr.tr~month+pop.tr+unemp.tr+hpi.tr+u2+p2+h2)
+summary(reg1)
+plot(bankr.tr)
+# superimpose the fit of model reg1 on the plot of the data
+points(t,predict.lm(reg1),type='l',col='red') 
+
+# Testing for years 2009 and 2010
+t.new <- seq(2009,2011,length=25)[1:24] 
+t2.new <- t.new^2
+month.new <- factor(rep(1:12,2)) # Introducing the seasonal value for forecasting
+
+
+lm_cakes <- lm(bankr.tr ~month*pop.tr)
+resettest(lm_cakes, power = 2, type = "fitted")
+resettest(lm_cakes, power = 3, type = "fitted")
+
+
+# Putting the values for forecasting into a dataframe
+new <- data.frame(month = month.new,pop.tr=pop.te, unemp.tr = unemp.te, hpi.tr = hpi.te, u2 = unemp.te^2, p2 = pop.te^2, h2 = hpi.te^2) 
+
+# Computing the prediction as well as the prediction interval
+pred <- predict.lm(reg1,new,interval='prediction')
+
+pred
+
+par(mfrow=c(1,1))
+# Plotting the data
+plot(bankr) 
+
+# Adding a vertical line at the point where prediction starts
+abline(v=2009,col='blue',lty=2) 
+# Plotting the predictions
+lines(pred[,1]~t.new,type='l',col='red')
+# Plotting lower limit of the prediction interval
+lines(pred[,2]~t.new,col='green') 
+# Plotting upper limit of the  prediction interval
+lines(pred[,3]~t.new,col='green') 
+
+rmse <- sqrt(mean((bankr.te - (pred[,1]))^2))
+rmse
+```
+
+
+
+```{r best_sarimax}
+d=1
+p=5
+P=10
+q=5
+Q=10
+D=1
+
+total_length = (d+1)*(D+1)*(p+1)*(P+1)*(q+1)*(Q+1)
+model_list <- rep(NA, total_length)
+rmse_list <- rep(NA, total_length)
+
+start_year = 1987
+start_index = ((start_year-1987)*12) + 1
+end_index = 264
+
+knot1 = ((1990-1987)*12) + 1
+knot2 = ((2000-1987)*12) + 1
+knot3 = ((2006-1987)*12) + 1
+
+x1 <- rep("A", knot1-1)
+x2 <- rep("B", knot2-knot1)
+x3 <- rep("C", knot3-knot2)
+x4 <- rep("D", length(bankr)+1-knot3)
+
+group <- model.matrix(~as.factor(c(x1,x2,x3,x4)))
+group <- group[,-1]
+group.tr <- group[start_index:end_index, ]
+group.te <- group[265:288, ]
+
+# x1 <- seq(1, length(bankr))
+# x2 <- pmax(0, x1-knot1)
+# x3 <- pmax(0, x1-knot2)
+# x4 <- pmax(0, x1-knot3)
+# 
+# x1.tr <- x1[start_index:end_index]
+# x2.tr <- x2[start_index:end_index]
+# x3.tr <- x3[start_index:end_index]
+# x4.tr <- x4[start_index:end_index]
+# 
+# x1.te <- x1[265:288]
+# x2.te <- x2[265:288]
+# x3.te <- x3[265:288]
+# x4.te <- x4[265:288]
+
+
+bankr.tr <- bankr[start_index:end_index] #training set
+bankr.tr <- ts(bankr.tr, start = c(start_year,1), frequency = 12)
+bankr.te <- ts(bankr[265:288], start = c(2009,1), frequency = 12)
+
+unemp.tr <- unemp[start_index:end_index]
+unemp.tr <- ts(unemp.tr, start = c(start_year,1), frequency = 12)
+unemp.te <- ts(unemp[265:288], start = c(2009,1), frequency = 12)
+
+hpi.tr <- hpi[start_index:end_index]
+hpi.tr <- ts(hpi.tr, start = c(start_year,1), frequency = 12)
+hpi.te <- ts(hpi[265:288], start = c(2009,1), frequency = 12)
+
+pop.tr <- pop[start_index:end_index]
+pop.tr <- ts(pop.tr, start = c(start_year,1), frequency = 12)
+pop.te <- ts(pop[265:288], start = c(2009,1), frequency = 12)
+
+training_range = bankr.tr
+training_external_regressors = cbind(unemp.tr, hpi.tr, group.tr)
+testing_external_regressors = cbind(unemp.te, hpi.te, group.te)
+
+index = 1
+for (D in seq(0,D)) {
+  for (p in seq(0,p)) {
+    for (q in seq(0,q)) {
+      for (P in seq(0,P)) {
+        for (Q in seq(0,Q)) {
+          
+            m <- arima(training_range,order=c(p,d,q),seasonal = list(order = c(P,D,Q), period = 12), method = "CSS", xreg = training_external_regressors)
+          f <- predict(m, n.ahead = 24, newxreg = testing_external_regressors)
+          rmse <- sqrt(mean((bankr.te - (f$pred))^2))
+          model_name <- paste("SARIMA", "(", p, d , q, ")", "x (", P, D, Q, ")[12]")
+          
+          model_list[index] <- model_name
+          rmse_list[index] <- rmse
+          index <-  index + 1
+        }
+      }
+    }
+  }
+}
+
+d <- data.frame(Model = model_list, RMSE = rmse_list)
+
+# Order this by rmse
+d[order(d$RMSE),][1:5,]
+
+best_rmse <- min(rmse_list)
+```
+
+
+The top 5 choices for p,P, q and Q are shown above, based on the test set RMSE. We pick as our optimal model the one with the lowest test RMSE, which is the SARIMAX (1,1,5)x(2,1,10)[12] model here. 
+
+When we check the residual diagnostics for the SARIMAX (1,1,5)x(2,1,10)[12] model, we find that the ACF plot does not have any significant spikes and the Ljung-Box plot confirms that the error residuals are zero-correlated/uncorrelated since the p-values are all above the threshold. A plot of the residuals indicates that they have zero mean. The residuals also display constant variance. The normality assumption is not met, but this is not required since we fit the model using least squares.
+
+All the residual diagostics discussed above are detailed in the appendix.
+
+\newpage
+
+Below, we show the model's forecasts and their associated 95% prediction intervals in both a tabular and graphical format.
+
+&nbsp;
+
+```{r}
+par(mfrow = c(1,1))
+best_model <- arima(training_range,order=c(1,1,5),seasonal = list(order = c(2,1,10), period = 12), method = "CSS", xreg = training_external_regressors)
+my_forecasts <- forecast(best_model, h = 24, level = 0.95, xreg = testing_external_regressors)
+my_df <- data.frame(Forecast = (my_forecasts$mean)[1:12], Lower = (my_forecasts$lower)[1:12], Upper = (my_forecasts$upper)[1:12])
+ts(my_df, start = 2009, frequency = 12)
+
+f<-forecast(best_model,h=24,level=0.95, xreg = testing_external_regressors)
+l<-ts(f$lower, start = c(2009), frequency = 12)  #95% PI LL
+h<-ts(f$upper, start = c(2009), frequency = 12) #95% PI UL
+pred<-f$mean #predictions
+par(mfrow=c(1,1))
+plot(bankr, main = "Monthly Bankruptcy Rates", ylab = "Bankruptcy Rates", xlab = "Month")
+points((pred), type = "l", col = "blue")
+points((l), type = "l", col = "red")
+points((h), type = "l", col = "red")
+points((f$fitted),type="l", col = "green")
+legend("topleft", legend = c("Observed", "Fitted", "Predicted", "95% PI"), lty = 1, col = c("black", "green", "blue", "red"), cex = 1)
+
+rmse <- sqrt(mean((bankr.te - (pred))^2))
+```
+
+```{r}
+tsdiag(best_model, gof.lag = 120)
+e <- best_model$residuals # residuals
+r <- e/sqrt(best_model$sigma2) # standardized residuals
+
+par(mfrow=c(1,1))
+plot(e, main="Residuals vs t", ylab="")
+```
+
+# Conclusion
+
+**The SARIMAX (1,1,5)x(2,1,10)[12] model performed the best among all four models and had an RMSE of 0.002972806 on the test set**. All the model assumptions were satisifed as well - zero-mean, zero-correlation, and homoscedasticity. Since the model was fit with least squares, the assumption of normality did not need to be satisifed. The residual diagnostics are attached in the appendix.
+
+Our recommendation is to use the SARIMAX (1,1,5)x(2,1,10)[12] model for forecasting.
+
+\newpage
+
+# Appendix
+
+## Residual Diagnostics for SARIMAX models
+
+
+

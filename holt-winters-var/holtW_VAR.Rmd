@@ -1,0 +1,872 @@
+---
+title: "Assignment 3"
+author: "Shivakanth Thudi"
+date: "12/05/2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, eval = TRUE, tidy = TRUE,comment = "")
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff=60))
+```
+
+```{r Initial_Setup, echo=FALSE, include=FALSE}
+library(car)
+library(lmtest)
+library("tseries")
+library(forecast)
+library(lawstat)
+library(vars)
+```
+
+# Introduction
+
+We read in the data and observe that both the export and import time series exhibit non-stationarity and that there is an increasing trend over the years. The data exhibits seasonality as well, though this is more apparent in the later years. We also observe that the variability in the import and export variables increases with time.
+
+Since our primary objective is to build a model that forecasts well, we split the data into training and testing sets. The training set consists of the first 19 years of data, with observations from January 1984 - December 2002. The test set includes observations for the next six years, from January 2003 - December 2008. 
+
+In each method, we consider whether we need to log-transform the data or not, and fit models accordingly.
+
+```{r read_data}
+china <- read.csv("china.csv")
+export <- ts(data = china$ch.exp, start = c(1984,1), frequency = 12)
+import <- ts(data = china$ch.imp, start = c(1984,1), frequency = 12)
+
+export.tr <- export[1:228] #training set
+export.tr <- ts(export.tr, start = c(1984,1), frequency = 12)
+export.te <- export[229:300] #test set
+export.te <- ts(export.te, start = c(2003,1), frequency = 12 )
+
+import.tr <- import[1:228] #training set
+import.tr <- ts(import.tr, start = c(1984,1), frequency = 12)
+import.te <- import[229:300] #test set
+import.te <- ts(import.te, start = c(2003,1), frequency = 12 )
+
+l_import.tr = log(import.tr)
+l_import.te = log(import.te)
+l_export.tr = log(export.tr)
+```
+
+&nbsp;
+&nbsp;
+
+```{r plot_export, echo = FALSE}
+par(mfrow=c(2,1))
+plot(export, main = "Monthly Exports in Millions USD", xlab = "Month", ylab = "Exports")
+acf(export, lag.max = 72, main = "ACF of Exports")
+```
+
+```{r plot_import, eval = FALSE}
+par(mfrow=c(2,1))
+plot(import)
+acf(import, lag.max = 72, main = "ACF of Imports")
+```
+
+\pagebreak 
+
+# Part (a) - Holt-Winters
+
+Since the data was non-stationary and exhibited both trend and seasonality, our intuition is that a triple exponential smoothing approach would work best. Since the variability increases with time, a multiplicative version of triple exponential smoothing should work better than the additive version. However, we will look at all possibilities (Single, Double, and Triple Exponential smoothing with both additive and multiplicative seasonality), and determine which method has the best predictive root mean squared error on the test set. 
+
+For the level, trend, and seasonal ($\alpha$, $\beta$, $\gamma$) parameters, we check all possible values from 0.0 to 1.0 with a step size of 0.01, and pick the best parameters in each smoothing method that correspond to the lowest RMSE on the test set. 
+
+&nbsp;
+
+```{r SES}
+# Exponential Smoothing
+hw.SES <- HoltWinters(x = export.tr, alpha =1,  beta = F, gamma = F)
+f.SES <- predict(hw.SES, n.ahead = 72)
+rmse.SES <- sqrt(mean((export.te - f.SES)^2))
+
+
+hw.DES <- HoltWinters(x = export.tr, alpha = 0.04, beta = 0.82, gamma = F) 
+f.DES <- predict(hw.DES, n.ahead = 72)
+rmse.DES <- sqrt(mean((export.te - f.DES)^2))
+
+
+hw.TES_ADD <- HoltWinters(x = export.tr,alpha = 0.14, beta = 0.94, gamma = 0.55, seasonal = "add") 
+f.TES_ADD <- predict(hw.TES_ADD, n.ahead = 72)
+rmse.TES_ADD <- sqrt(mean((export.te - f.TES_ADD)^2))
+
+hw.TES_MUL <- HoltWinters(x = export.tr, alpha = 0.03, beta = 0.99, gamma = 0.46, seasonal = "mult")
+f.TES_MUL <- predict(hw.TES_MUL, n.ahead = 72)
+rmse.TES_MUL <- sqrt(mean((export.te - f.TES_MUL)^2))
+```
+
+
+```{r iter, eval=FALSE}
+best_rmse <- NA
+best_alpha <- NA
+
+for (alpha in seq(0.01,1,0.01)) {
+  hw.SES <- HoltWinters(x = export.tr, alpha = alpha, beta = F, gamma = F)
+  f.SES <- predict(hw.SES, n.ahead = 72)
+  rmse.SES <- sqrt(mean((export.te - f.SES)^2))
+  if ((rmse.SES < best_rmse) | (is.na(best_rmse))) {
+    best_alpha <- alpha
+    best_rmse <- rmse.SES
+  }
+}
+print(best_rmse)
+print(best_alpha)
+```
+
+```{r iter_2, eval = FALSE}
+best_rmse <- NA
+best_alpha <- NA
+best_beta <- NA
+
+for (alpha in seq(0.01,1,0.01)) {
+  for (beta in seq(0.01,1,0.01)) {
+  hw.DES <- HoltWinters(x = export.tr, alpha = alpha, beta = beta, gamma = F)
+  f.DES <- predict(hw.DES, n.ahead = 72)
+  rmse.DES <- sqrt(mean((export.te - f.DES)^2))
+  if ((rmse.DES < best_rmse) | (is.na(best_rmse))) {
+    best_alpha <- alpha
+    best_rmse <- rmse.DES
+    best_beta <- beta
+  }
+ }
+}
+print(best_rmse)
+print(best_alpha)
+print(best_beta)
+```
+
+```{r iter_3, eval = FALSE}
+best_rmse <- NA
+best_alpha <- NA
+best_beta <- NA
+best_gamma <- NA
+
+for (alpha in seq(0.0,1.0,0.1)[-c(1)]) {
+  print(alpha)
+  for (beta in seq(0.0,1,0.1)[-c(1)]) {
+    for (gamma in seq(0.0,1,0.1)[-c(1)]) {
+  hw.TES_ADD <- HoltWinters(x = l_export.tr, alpha = alpha, beta = beta, gamma = gamma, seasonal = "add")
+  f.TES_ADD <- predict(hw.TES_ADD, n.ahead = 72)
+  rmse.TES_ADD <- sqrt(mean((export.te - exp(f.TES_ADD))^2))
+  if ((rmse.TES_ADD < best_rmse) | (is.na(best_rmse))) {
+    best_alpha <- alpha
+    best_rmse <- rmse.TES_ADD
+    best_beta <- beta
+    best_gamma <- gamma
+  }
+    }
+ }
+}
+print(best_rmse)
+print(best_alpha)
+print(best_beta)
+print(best_gamma)
+```
+
+```{r iter_4, eval = FALSE}
+best_rmse <- NA
+best_alpha <- NA
+best_beta <- NA
+best_gamma <- NA
+
+for (alpha in seq(0.0,1.0,0.1)[-c(1)]) {
+  print(alpha)
+  for (beta in seq(0.0,1.0,0.1)[-c(1)]) {
+    for (gamma in seq(0.0,1.0,0.1)[-c(1)]) {
+  hw.TES_MUL <- HoltWinters(x = l_export.tr, alpha = alpha, beta = beta, gamma = gamma, seasonal = "mult")
+  f.TES_MUL <- predict(hw.TES_MUL, n.ahead = 72)
+  rmse.TES_MUL <- sqrt(mean((export.te - exp(f.TES_MUL))^2))
+  if ((rmse.TES_MUL < best_rmse) | (is.na(best_rmse))) {
+    best_alpha <- alpha
+    best_rmse <- rmse.TES_MUL
+    best_beta <- beta
+    best_gamma <- gamma
+  }
+    }
+ }
+}
+print(best_rmse)
+print(best_alpha)
+print(best_beta)
+print(best_gamma)
+```
+
+|Model|RMSE on the test set|Optimal $\alpha$|Optimal $\beta$|Optimal $\gamma$|
+|---------------------------------------------|------------|--------|--------|--------|
+|Single Exponential Smoothing (SES)|`r round(rmse.SES, 2)`|1.0|N/A|N/A|
+|Double Exponential Smoothing (DES)|`r round(rmse.DES,2)`|0.04|0.82|N/A|
+|**Triple Exponential Smoothing (TES) with Additive Seasonality**|**`r round(rmse.TES_ADD,2)`**|0.14|0.94|0.55|
+|Triple Exponential Smoothing (TES) with Multiplicative Seasonality|`r round(rmse.TES_MUL,2)`|0.03|0.99|0.46|
+
+We observe that the Triple Exponential Smoothing method with additive seasonality works best here, since it has the lowest RMSE  - `r round(rmse.TES_ADD, 2) `, on the test set. The version with multiplicative seasonality performs slightly worse. **However, in both triple exponential smoothing methods, we observe from the residual diagnostics that the residuals are correlated.** In particular, note the following plot of the standardized residuals and the ACF for the triple exponential smoothing method with multiplicative seasonality:
+
+&nbsp;
+
+```{r}
+par(mfrow=c(1,1))
+best_model <- HoltWinters(x = export.tr, alpha = 0.03, beta = 0.99, gamma = 0.46, seasonal = "mult")
+hw_forecast <- forecast(best_model)
+e <- hw_forecast$residuals # residuals
+r <- e/sqrt(best_model$SSE) # standardized residuals
+
+# Plot these
+par(mfrow=c(2,1))
+plot(r, main="Standardized Residuals vs t", ylab="")
+abline(h=0, col="red")
+
+# test whether residuals are correlated
+acf(na.omit(r), main = "ACF of Residuals")
+
+```
+
+We see increasing variability in the standardized residuals with time, and there are many significant spikes in the ACF plot. So while these triple exponential smoothing methods have low RMSE on the testing set, the model assumptions are being violated. 
+
+**This prompts us to log-transform the data and consider Triple Exponential Smoothing with additive seasonality, since logging will convert multiplicative seasonal patterns to additive patterns**. We perform exponential smoothing on the log-transformed exports data.
+
+```{r SES_Log}
+# Exponential Smoothing with Log-Transformation
+hw.SES <- HoltWinters(x = l_export.tr, alpha =1,  beta = F, gamma = F)
+f.SES <- predict(hw.SES, n.ahead = 72)
+rmse.SES <- sqrt(mean((export.te - exp(f.SES))^2))
+
+
+hw.DES <- HoltWinters(x = l_export.tr, alpha = 0.23, beta = 0.87, gamma = F) 
+f.DES <- predict(hw.DES, n.ahead = 72)
+rmse.DES <- sqrt(mean((export.te - exp(f.DES))^2))
+
+
+hw.TES_ADD <- HoltWinters(x = l_export.tr,alpha = 0.1, beta = 0.86, gamma = 0.62, seasonal = "add") 
+f.TES_ADD <- predict(hw.TES_ADD, n.ahead = 72)
+rmse.TES_ADD <- sqrt(mean((export.te - exp(f.TES_ADD))^2))
+```
+
+
+```{r iter_log, eval=FALSE}
+best_rmse <- NA
+best_alpha <- NA
+
+for (alpha in seq(0.0,1,0.1)[-c(1)]) {
+  print(alpha)
+  hw.SES <- HoltWinters(x = l_export.tr, alpha = alpha, beta = F, gamma = F)
+  f.SES <- predict(hw.SES, n.ahead = 72)
+  rmse.SES <- sqrt(mean((export.te - exp(f.SES))^2))
+  if ((rmse.SES < best_rmse) | (is.na(best_rmse))) {
+    best_alpha <- alpha
+    best_rmse <- rmse.SES
+  }
+}
+print(best_rmse)
+print(best_alpha)
+```
+
+```{r iter_2_log, eval = FALSE}
+best_rmse <- NA
+best_alpha <- NA
+best_beta <- NA
+
+for (alpha in seq(0.01,1,0.01)) {
+  for (beta in seq(0.01,1,0.01)) {
+  hw.DES <- HoltWinters(x = l_export.tr, alpha = alpha, beta = beta, gamma = F)
+  f.DES <- predict(hw.DES, n.ahead = 72)
+  rmse.DES <- sqrt(mean((export.te - exp(f.DES))^2))
+  if ((rmse.DES < best_rmse) | (is.na(best_rmse))) {
+    best_alpha <- alpha
+    best_rmse <- rmse.DES
+    best_beta <- beta
+  }
+ }
+}
+print(best_rmse)
+print(best_alpha)
+print(best_beta)
+```
+
+```{r iter_3_log, eval = FALSE}
+best_rmse <- NA
+best_alpha <- NA
+best_beta <- NA
+best_gamma <- NA
+
+for (alpha in seq(0.0,1.0,0.01)[-c(1)]) {
+  print(alpha)
+  for (beta in seq(0.0,1,0.01)[-c(1)]) {
+    for (gamma in seq(0.0,1,0.01)[-c(1)]) {
+  hw.TES_ADD <- HoltWinters(x = l_export.tr, alpha = alpha, beta = beta, gamma = gamma, seasonal = "add")
+  f.TES_ADD <- predict(hw.TES_ADD, n.ahead = 72)
+  rmse.TES_ADD <- sqrt(mean((export.te - exp(f.TES_ADD))^2))
+  if ((rmse.TES_ADD < best_rmse) | (is.na(best_rmse))) {
+    best_alpha <- alpha
+    best_rmse <- rmse.TES_ADD
+    best_beta <- beta
+    best_gamma <- gamma
+  }
+    }
+ }
+}
+print(best_rmse)
+print(best_alpha)
+print(best_beta)
+print(best_gamma)
+```
+
+
+|Model|RMSE on the test set after **Log-Transformation**|Optimal $\alpha$|Optimal $\beta$|Optimal $\gamma$|
+|------------------------------------|---------------|----------|----------|----------|
+|Single Exponential Smoothing (SES)|`r round(rmse.SES, 2)`|1.0|N/A|N/A|
+|Double Exponential Smoothing (DES)|`r round(rmse.DES,2)`|0.23|0.87|N/A|
+|Triple Exponential Smoothing (TES) with Additive Seasonality|`r round(rmse.TES_ADD,2)`|0.1|0.86|0.62|
+
+We observe that after log-transforming the exports data, the triple exponential smoothing method with additive seasonality works best here, since it has the lowest RMSE  - `r round(rmse.TES_ADD, 2) `, on the test set. However, **we note that the model assumption of zero-correlation is still not met, after we log-transform and perform smoothing**. The residual diagnostics are attached in the appendix.
+
+**When we tune the smoothing parameters and build models that minimize the testing RMSE - regardless of whether we log transform or not - we find that the residuals are correlated.**This casts doubt on the validity of the model to make predictions. So while we provide the optimal model's forecasts below ("optimal" according to test set RMSE), **it is our recommendation that the other models in this report be used in lieu of these exponential smoothing methods since the other models satisfy all model assumptions.**
+
+The model with the lowest RMSE was the triple exponential smoothing model with additive seasonality (without log-transformation).
+Below, we show the model's forecasts and their associated 95% prediction intervals in both a tabular and graphical format. For the tabular format, we show only the first year's forecasts; in the graph, we show all the forecasts from January 2003 to December 2008.
+
+&nbsp;
+
+```{r}
+best_model <- HoltWinters(x = export.tr, alpha = 0.14, beta = 0.94, gamma = 0.55, seasonal = "add") 
+my_forecasts <- forecast(best_model, h = 12, level = 0.95)
+my_df <- data.frame(Forecast = my_forecasts$mean, Lower = my_forecasts$lower[1:12], Upper = my_forecasts$upper[1:12])
+ts(my_df, start = 2003, frequency = 12)
+
+f<-forecast(best_model,h=72,level=0.95)
+l<-ts(f$lower, start = c(2003), frequency = 12)  #95% PI LL
+h<-ts(f$upper, start = c(2003), frequency = 12) #95% PI UL
+pred<-f$mean #predictions
+par(mfrow=c(1,1))
+plot(export, ylim=c(-2000,4000), main = "Forecasts using Triple Exponential Smoothing\n and Additive Seasonality", ylab = "Exports", xlab = "Month")
+points(pred, type = "l", col = "blue")
+points(l, type = "l", col = "red")
+points(h, type = "l", col = "red")
+points(f$fitted,type="l", col = "green")
+legend("topleft", legend = c("Observed", "Fitted", "Predicted", "95% PI"), lty = 1, col = c("black", "green", "blue", "red"), cex = 1)
+```
+
+The forecasts are made for the period between January 2003 to December 2008.
+
+## Residual Diagnostics
+
+The residual diagnostics are shown in the appendix. The only assumption that is met is the assumption of zero-mean. The assumptions of zero-correlation and homoscedasticity are both not met. The assumption of normality is also not met, however, this is not a requirement in the case of exponential smoothing methods.
+
+## Part (b) - SARIMA
+
+**Since the variability increases with time, we log-transform the export data to stabilize the variance.** 
+
+### Choosing d and D
+Since the time series was not stationary, we will need to do some differencing.  We difference once (ordinary) and look at the transformed time-series and ACF plot afterwards:
+
+```{r}
+# Both forms of differencing seem necessary. Let's do ordinary first:
+dchina <- diff(l_export.tr)
+par(mfrow=c(2,1))
+plot(dchina, main = "Trend Adjusted Monthly Exports in million USD", ylab = "Exports", xlab = "Month")
+acf(dchina, lag.max = 48, main = "Export")
+```
+
+We observe that after ordinary differencing once, the observed time series looks flat. The ACF plot depicts rapid decay rather than slow decay. The ACF plot also indicates that there is seasonality present, due to the recurring nature of the peaks when the lag is 12. So we do seasonal differencing as well.
+
+```{r}
+# Still need seasonal differencing:
+dchina.12 <- diff(dchina, lag = 12)
+par(mfrow=c(2,1))
+plot(dchina.12, main = "Trend and Seasonally Adjusted Monthly Exports", ylab = "Exports in million USD", xlab = "Month")
+acf(dchina.12, lag.max = 48, main = "Beer")
+```
+
+After seasonally differencing once, the ACF plot does not indicate that any more seasonal differencing is required. **So we choose the order of the ordinary differencing, d as 1 and the order of the seasonal differencing, D as 1 too.**
+
+#### Choosing p,q,P,and Q 
+
+```{r, echo = FALSE}
+# This seems fine now. Since we seasonally differenced, we are fitting a SARIMA 
+# model and need to choose p, q, P, Q. Let's look at the ACF/PACF plots for this
+par(mfrow=c(2,1))
+acf(dchina.12, lag.max = 72, main ="Exports")
+pacf(dchina.12, lag.max = 72, main = "Exports")
+```
+
+We observe that there are are 2 significant spikes in the PACF. Considering seasonal lags separated by 12 (at 1s, 2s, 3s, etc. with s=12), we see 2 spikes. **So p might be less than/equal to 2 and P less than/equal to 2.** In the ACF, we see 1 significant spike, and with seasonal lags separated by 12 we see 1 significant spike. **So q might be less than 1, and Q might be less than 1. **
+
+So with 36 different combinations of p,P,q, and Q, we fit SARIMA models on the log-transformed data using Maximum Likelihood. However, when we pick an optimal model based on test set RMSE and look at the residual diagnostics, we observe that the normality assumption is not met. In particular, observe the qqplot below, which is for the SARIMA (1,1,1) x (0,1,0) [12] model:
+
+```{r, fig.width=4, fig.height=3}
+best_model_ML <- arima(l_export.tr,order=c(1,1,1),seasonal = list(order = c(0,1,0), period = 12), method = "ML")
+qqnorm(best_model_ML$residuals)
+qqline(best_model_ML$residuals, col = "red")
+```
+
+Since the normality assumption is not met, we fit the models using the method of Least Squares instead. The following table shows the top 5 optimal choices for p,P,q, and Q based on test set RMSE when fitting with least squares:
+
+
+```{r}
+total_length = 3*3*2*2
+model_list <- rep(NA, total_length)
+rmse_list <- rep(NA, total_length)
+
+index = 1
+for (p in seq(0,2)) {
+  for (q in seq(0,1)) {
+    for (P in seq(0,2)) {
+      for (Q in seq(0,1)) {
+        
+        m <- arima(l_export.tr,order=c(p,1,q),seasonal = list(order = c(P,1,Q), period = 12), method = "CSS")
+        f <- predict(m, n.ahead = 72)
+        rmse <- sqrt(mean((export.te - exp(f$pred))^2))
+        model_name <- paste("SARIMA", "(", p, "1", q, ")", "x(", P, "1", Q, ")[12]")
+        
+        model_list[index] <- model_name
+        rmse_list[index] <- rmse
+        index <-  index + 1
+      }
+    }
+  }
+}
+
+d <- data.frame(Model = model_list, RMSE = rmse_list)
+
+# Order this by rmse
+d[order(d$RMSE),][1:5,]
+
+best_rmse <- min(rmse_list)
+```
+
+We pick as our optimal model the one with the lowest test RMSE, which is the SARIMA(2,1,1)x(0,1,0)[12] model here. The test set RMSE was `r round(best_rmse,2)`.
+
+Below, we show the model's forecasts and their associated 95% prediction intervals in both a tabular and graphical format. For the tabular format, we show only the first year's forecasts; in the graph, we show all the forecasts from January 2003 to December 2008.
+
+&nbsp;
+
+```{r}
+best_model <- arima(l_export.tr,order=c(2,1,1),seasonal = list(order = c(0,1,0), period = 12), method = "CSS")
+par(mfrow = c(1,1))
+my_forecasts <- forecast(best_model, h = 12, level = 0.95)
+my_df <- data.frame(Forecast = exp(my_forecasts$mean), Lower = exp(my_forecasts$lower)[1:12], Upper = exp(my_forecasts$upper)[1:12])
+ts(my_df, start = 2003, frequency = 12)
+
+f<-forecast(best_model,h=72,level=0.95)
+l<-ts(f$lower, start = c(2003), frequency = 12)  #95% PI LL
+h<-ts(f$upper, start = c(2003), frequency = 12) #95% PI UL
+pred<-f$mean #predictions
+par(mfrow=c(1,1))
+plot(export, ylim=c(0,1600), main = "Monthly Exports", ylab = "Exports", xlab = "Month")
+points(exp(pred), type = "l", col = "blue")
+points(exp(l), type = "l", col = "red")
+points(exp(h), type = "l", col = "red")
+points(exp(f$fitted),type="l", col = "green")
+legend("topleft", legend = c("Observed", "Fitted", "Predicted", "95% PI"), lty = 1, col = c("black", "green", "blue", "red"), cex = 1)
+```
+
+#### Residual Diagnostics
+
+The residual diagnostics are attached in the appendix. In particular, the assumptions of zero-mean, zero-correlation, and homoscedasticity are all met. The assumption of normality was not met; however, since we use the method of least squares, we do not need to meet this requirement.
+
+## Part (c) - SARIMA + exogenous variable (i.e., the "import" time series)
+
+#### Choosing the orders and parameters
+
+We pick the same orders for the ordinary and seasonal differencing as we did in part (b), i.e. we pick d as 1 and D as 1 too. The same ranges for p,q,P,and Q are maintained. We also fit the SARIMAX model on the log-transformed export data. **Here, the exogenous variable is the log-transformed import time series.**
+
+As in part (b), when we pick an optimal model based on test set RMSE and look at the residual diagnostics, we observe that the normality assumption is not met. In particular, observe the qqplot below, which is for the SARIMAX (0,1,0) x (0,1,0) [12] model:
+
+```{r,fig.width=4, fig.height=3}
+best_model_ML <- arima(l_export.tr,order=c(0,1,0),seasonal = list(order = c(0,1,0), period = 12), method = "ML", xreg = data.frame(l_import.tr))
+qqnorm(best_model_ML$residuals)
+qqline(best_model_ML$residuals, col = "red")
+```
+
+Since the normality assumption is not met, we fit the models using the method of Least Squares instead. The following table shows the top 5 optimal choices for p,P,q, and Q based on test set RMSE when fitting SARIMAX models with least squares:
+
+```{r best_sarimax}
+total_length = 36
+model_list <- rep(NA, total_length)
+rmse_list <- rep(NA, total_length)
+
+index = 1
+for (p in seq(0,2)) {
+  for (q in seq(0,1)) {
+    for (P in seq(0,2)) {
+      for (Q in seq(0,1)) {
+        
+        m <- arima(l_export.tr,order=c(p,1,q),seasonal = list(order = c(P,1,Q), period = 12), method = "CSS", xreg = data.frame(l_import.tr))
+        f <- predict(m, n.ahead = 72, newxreg = l_import.te)
+        rmse <- sqrt(mean((export.te - exp(f$pred))^2))
+        model_name <- paste("SARIMA", "(", p, "1", q, ")", "x (", P, "1", Q, ")[12]")
+        
+        model_list[index] <- model_name
+        rmse_list[index] <- rmse
+        index <-  index + 1
+      }
+    }
+  }
+}
+
+d <- data.frame(Model = model_list, RMSE = rmse_list)
+
+# Order this by rmse
+d[order(d$RMSE),][1:5,]
+
+best_rmse <- min(rmse_list)
+```
+
+The top 5 choices for p,P, q and Q are shown above, based on the test set RMSE. We pick as our optimal model the one with the lowest test RMSE, which is the SARIMAX (0,1,0)x(0,1,0)[12] model here. The test set RMSE was `r round(best_rmse,2)`. 
+
+However, when we check the residual diagnostics for this model, we find that the the ACF plot has one significant spike and the Ljung-Box plot indicates that the residuals are correlated since the p-values are all below the threshold. (See Appendix)
+
+**This prompts us to choose the next best model, which is the SARIMAX (1,1,0)x(0,1,0)[12] model**. However, we run into the same problem - the ACF plot still has one significant spike and the Ljung-Box plot also indicates that the residuals are correlated since there are some p-values that are below the threshold. **This prompts us to move on to the next best model, which is the SARIMAX (2,1,0)x(0,1,0)[12] model.** 
+
+When we check the residual diagnostics for the SARIMAX (2,1,0)x(0,1,0)[12] model, we find that the ACF plot does not have any significant spikes and the Ljung-Box plot confirms that the error residuals are zero-correlated/uncorrelated since the p-values are all above the threshold. A plot of the residuals indicates that they have zero mean. The residuals also display constant variance. The normality assumption is not met, but this is not required since we fit the model using least squares.
+
+All the residual diagostics discussed above are detailed in the appendix.
+
+\newpage
+
+Below, we show the model's forecasts and their associated 95% prediction intervals in both a tabular and graphical format. For the tabular format, we show only the first year's forecasts; in the graph, we show all the forecasts from January 2003 to December 2008.
+
+&nbsp;
+
+```{r}
+par(mfrow = c(1,1))
+best_model <- arima(l_export.tr,order=c(2,1,0),seasonal = list(order = c(0,1,0), period = 12), method = "CSS", xreg = data.frame(l_import.tr))
+my_forecasts <- forecast(best_model, h = 72, level = 0.95, xreg = data.frame(l_import.te))
+my_df <- data.frame(Forecast = exp(my_forecasts$mean)[1:12], Lower = exp(my_forecasts$lower)[1:12], Upper = exp(my_forecasts$upper)[1:12])
+ts(my_df, start = 2003, frequency = 12)
+
+f<-forecast(best_model,h=72,level=0.95, xreg = data.frame(l_import.te))
+l<-ts(f$lower, start = c(2003), frequency = 12)  #95% PI LL
+h<-ts(f$upper, start = c(2003), frequency = 12) #95% PI UL
+pred<-f$mean #predictions
+par(mfrow=c(1,1))
+plot(export, ylim=c(0,1600), main = "Monthly Exports", ylab = "Exports", xlab = "Month")
+points(exp(pred), type = "l", col = "blue")
+points(exp(l), type = "l", col = "red")
+points(exp(h), type = "l", col = "red")
+points(exp(f$fitted),type="l", col = "green")
+legend("topleft", legend = c("Observed", "Fitted", "Predicted", "95% PI"), lty = 1, col = c("black", "green", "blue", "red"), cex = 1)
+```
+
+\newpage
+
+## Part (d) - VAR + seasonal indicator (where both "export"" and "import"" time series are treated as endogenous variables)
+
+We consider the import and export time series to be endogenous variables and use Vector Autoregression to fit a model. We choose the order p of the VAR model by evaluating the test set RMSE for each possible value of p and picking the value of p that corresponds to the lowest testing RMSE. Here, we consider a range of 1 to 10 for the value of p. Also, for the seasonal indicator, we specify that the period is 12 since the data corresponds to monthly observations.
+
+```{r VAR}
+index = 1
+total_length = 10
+model_list <- rep(NA, total_length)
+rmse_list <- rep(NA, total_length)
+
+for (p in seq(1,10)) {
+        
+        m <- VAR(y = data.frame(export.tr, import.tr), p = p, season = 12)
+        f <- predict(m, n.ahead = 72, ci=0.95)
+        rmse <- sqrt(mean((export.te - f$fcst$export.tr[,1])^2))
+        model_name <- paste("VAR", "(", p, ")")
+        
+        model_list[index] <- model_name
+        rmse_list[index] <- rmse
+        index <-  index + 1
+}
+
+d <- data.frame(Model = model_list, RMSE = rmse_list)
+
+# Order this by rmse
+d[order(d$RMSE),][1:5,]
+
+best_rmse <- min(rmse_list)
+
+```
+
+```{r VAR_log, eval = FALSE}
+index = 1
+total_length = 10
+model_list <- rep(NA, total_length)
+rmse_list <- rep(NA, total_length)
+
+for (p in seq(1,10)) {
+        
+        m <- VAR(y = data.frame(l_export.tr, l_import.tr), p = p, season = 12)
+        f <- predict(m, n.ahead = 72, ci=0.95)
+        rmse <- sqrt(mean((export.te - exp(f$fcst$l_export.tr[,1]))^2))
+        model_name <- paste("VAR", "(", p, ")")
+        
+        model_list[index] <- model_name
+        rmse_list[index] <- rmse
+        index <-  index + 1
+}
+
+d <- data.frame(Model = model_list, RMSE = rmse_list)
+
+# Order this by rmse
+d[order(d$RMSE),][1:5,]
+
+best_rmse <- min(rmse_list)
+
+```
+
+We observe that the best value of p is 7, based on test set RMSE. We pick the VAR(7) model as our optimal choice and 
+show the model's forecasts and their associated 95% prediction intervals in both a tabular and graphical format. For the tabular format, we show only the first year's forecasts; in the graph, we show all the forecasts from January 2003 to December 2008.
+
+&nbsp;
+
+```{r}
+best_model <- VAR(y = data.frame(export.tr, import.tr), p = 7, season = 12)
+par(mfrow = c(1,1))
+pred <- predict(best_model, n.ahead = 72, ci = 0.95)
+
+my_df <- data.frame(Forecast = pred$fcst$export.tr[,1][1:12], Lower = pred$fcst$export.tr[,2][1:12], Upper = pred$fcst$export.tr[,3][1:12])
+ts(my_df, start = 2003, frequency = 12)
+
+predictions <- predict(best_model, n.ahead = 72, ci = 0.95)
+f <- predictions$fcst$export.tr
+
+l<-ts(f[,2], start = c(2003), frequency = 12)  #95% PI LL
+h<-ts(f[,3], start = c(2003), frequency = 12) #95% PI UL
+pred<-ts(f[,1], start = c(2003), frequency = 12) #predictions
+par(mfrow=c(1,1))
+plot(export, ylim=c(0,1600), main = "Monthly Exports", ylab = "Exports", xlab = "Month")
+points(pred, type = "l", col = "blue")
+points(l, type = "l", col = "red")
+points(h, type = "l", col = "red")
+points(ts(best_model$varresult$export.tr$fitted.values, start = c(1984,8), frequency = 12),type="l", col = "green")
+legend("topleft", legend = c("Observed", "Fitted", "Predicted", "95% PI"), lty = 1, col = c("black", "green", "blue", "red"), cex = 1)
+```
+
+## Residual Diagnostics
+
+The residual diagnostics are displayed in the appendix. The assumptions of zero-mean, zero-correlation, and homoscedasticity are satisfied. The assumption of normality is not satisfied, but this is not a requirement when using Vector AutoRegression (VAR).
+
+# Conclusion
+
+**The SARIMAX (2,1,0)x(0,1,0)[12] model performed the best among all four models and had an RMSE of 50.04 on the test set**. All the model assumptions were satisifed as well - zero-mean, zero-correlation, and homoscedasticity. Since the model was fit with least squares, the assumption of normality did not need to be satisifed. The residual diagnostics are attached in the appendix.
+
+Our recommendation is to use the SARIMAX (2,1,0)x(0,1,0)[12] model for forecasting.
+
+\newpage
+
+# Appendix
+
+## Residual Diagnostics for Part (a) - Triple Exponential Smoothing with Additive Seasonality
+
+#### 1) Zero Mean and Zero-Correlation
+
+```{r}
+par(mfrow=c(1,1))
+best_model <- HoltWinters(x = export.tr,alpha = 0.14, beta = 0.94, gamma = 0.55, seasonal = "add")  
+hw_forecast <- forecast(best_model)
+e <- hw_forecast$residuals # residuals
+r <- e/sqrt(best_model$SSE) # standardized residuals
+
+# Plot these
+par(mfrow=c(2,1))
+plot(r, main="Standardized Residuals vs t", ylab="")
+abline(h=0, col="red")
+
+# test whether residuals are correlated
+acf(na.omit(r), main = "ACF of Residuals")
+```
+
+The plot of the residuals indicates that the error terms have a zero mean. However, the ACF plot indicates that the residuals are correlated. This casts doubts on the model's ability to make reliable predictions, even though it minimizes test set RMSE.
+
+#### 2) Homoscedasticity
+
+```{r, fig.width=5, fig.height=4, echo =TRUE}
+par(mfrow=c(1,1))
+plot(e, main="Residuals vs t", ylab="")
+abline(v=c(1989,1994, 1999), lwd=3, col="red")
+group <- c(rep(1,57),rep(2,57),rep(3,57),rep(4,57))
+levene.test(e,group) #Levene
+bartlett.test(e,group) #Bartlett
+```
+
+The error terms are clearly heteroscedastic. We also confirm this with a Levene test and Bartlett test, which reject the null hypothesis that the error terms are homoscedastic. This is a result of tuning the smoothing parameters to minimize the test set RMSE, which results in a model that does well on the testing data but which fails to meet model assumptions.
+
+\newpage
+
+#### 3) Normality
+
+```{r,fig.width=4, fig.height=3}
+# Residual Diagnostics:
+qqnorm(e)
+qqline(e, col = "red")
+# test for normality
+shapiro.test(e) #SW test
+```
+
+The qqplot indicates normality of the error terms. The Shapiro Test fails to reject the null hypothesis that the residuals are normally distributed. However, since we fit the model using an exponential smoothing method, we do not need to satisfy the assumption of normality.
+
+\newpage
+
+## Residual Diagnostics for Part (b) - SARIMA(2,1,1)x(0,1,0)[12]
+
+#### 1) Zero Mean and Zero-Correlation
+
+```{r}
+par(mfrow=c(1,1))
+best_model <- arima(l_export.tr,order=c(2,1,1),seasonal = list(order = c(0,1,0), period = 12), method = "CSS")
+tsdiag(best_model)
+```
+
+The plot of the residuals indicates that the error terms have a zero mean. The ACF plot does not have any significant spikes and the Ljung-Box plot confirms that the error residuals are zero-correlated/uncorrelated since the p-values are all above the threshold.
+
+#### 2) Homoscedasticity
+
+```{r, fig.width=5, fig.height=4, echo =TRUE}
+e <- best_model$residuals # residuals
+r <- e/sqrt(best_model$sigma2) # standardized residuals
+
+par(mfrow=c(1,1))
+plot(e, main="Residuals vs t", ylab="")
+abline(v=c(1989,1994, 1999), lwd=3, col="red")
+group <- c(rep(1,57),rep(2,57),rep(3,57),rep(4,57))
+levene.test(e,group) #Levene
+bartlett.test(e,group) #Bartlett
+```
+
+The error terms look homoscedastic.We confirm this with a Levene test and Bartlett test, which fails to reject the null hypothesis that the error terms are homoscedastic. Hence, the assumption of homoscedasticity is met. 
+
+\newpage
+
+#### 3) Normality
+
+```{r,fig.width=4, fig.height=3}
+# Residual Diagnostics:
+qqnorm(best_model$residuals)
+qqline(best_model$residuals, col = "red")
+# test for normality
+shapiro.test(e) #SW test
+```
+
+The qqplot indicates non-normality of the error terms. The Shapiro Test also indicates that the error terms are not normally distributed. However, since we fit the model using Least Squares, we do not need to satisfy the assumption of normality.
+
+\newpage
+
+## Residual Diagnostics for Part (c) - SARIMAX models
+
+#### Zero Mean and Zero-Correlation for the SARIMAX (0,1,0)x(0,1,0)[12] model
+
+&nbsp;
+&nbsp;
+
+```{r}
+par(mfrow=c(1,1))
+best_model <- arima(l_export.tr,order=c(0,1,0),seasonal = list(order = c(0,1,0), period = 12), method = "CSS", xreg = data.frame(l_import.tr))
+tsdiag(best_model)
+```
+
+The plot of the residuals indicates that the error terms have a zero mean. However, the ACF plot has one significant spike and the Ljung-Box plot seems to indicate that the residuals are correlated since the p-values are all below the threshold. 
+
+**This prompts us to choose the next best model, which was the SARIMAX (1,1,0)x(0,1,0)[12] model**. We check the assumption of uncorrelated residuals for this model now:
+
+\newpage
+
+#### Zero Mean and Zero-Correlation for the SARIMAX (1,1,0)x(0,1,0)[12] model
+
+&nbsp;
+&nbsp;
+
+```{r}
+par(mfrow=c(1,1))
+best_model <- arima(l_export.tr,order=c(1,1,0),seasonal = list(order = c(0,1,0), period = 12), method = "CSS", xreg = data.frame(l_import.tr))
+tsdiag(best_model)
+```
+
+The ACF plot has one significant spike and the Ljung-Box plot seems to indicate that the residuals are correlated since there are some p-values that are below the threshold. **This prompts us to move on to the next best model, which is the SARIMAX (2,1,0)x(0,1,0)[12] model.** We check the diagnostics for this model below.
+
+\newpage
+
+#### 1) Zero Mean and Zero-Correlation for the SARIMAX (2,1,0)x(0,1,0)[12] model
+
+&nbsp;
+&nbsp;
+
+```{r}
+par(mfrow=c(1,1))
+best_model <- arima(l_export.tr,order=c(2,1,0),seasonal = list(order = c(0,1,0), period = 12), method = "CSS", xreg = data.frame(l_import.tr))
+tsdiag(best_model)
+```
+
+The ACF plot does not have any significant spikes and the Ljung-Box plot confirms that the error residuals are zero-correlated/uncorrelated since the p-values are all above the threshold. Hence, we pick this model as our optimal choice.
+
+#### 2) Homoscedasticity
+
+```{r, fig.width=5, fig.height=4, echo =TRUE}
+e <- best_model$residuals # residuals
+r <- e/sqrt(best_model$sigma2) # standardized residuals
+
+par(mfrow=c(1,1))
+plot(e, main="Residuals vs t", ylab="")
+abline(v=c(1989,1994, 1999), lwd=3, col="red")
+group <- c(rep(1,57),rep(2,57),rep(3,57),rep(4,57))
+levene.test(e,group) #Levene
+bartlett.test(e,group) #Bartlett
+```
+
+The error terms look homoscedastic. We confirm this with a Levene test which fails to reject the null hypothesis that the error terms are homoscedastic. The Bartlett test, on the other hand, rejects the null hypothesis. This might be attributed to the fact that the Bartlett test is sensitive to departures from normality. Hence, we can still conclude that the assumption of homoscedasticity is met. 
+
+\newpage
+
+#### 3) Normality
+
+```{r,fig.width=4, fig.height=3}
+# Residual Diagnostics:
+qqnorm(best_model$residuals)
+qqline(best_model$residuals, col = "red")
+# test for normality
+shapiro.test(e) #SW test
+```
+
+The qqplot indicates non-normality of the error terms. The Shapiro Test also indicates that the error terms are not normally distributed. However, since we fit the model using Least Squares, we do not need to satisfy the assumption of normality.
+
+\newpage
+
+## Residual Diagnostics for Part (d) - VAR(7) + seasonal indicator
+
+#### 1) Zero Mean and Zero-Correlation
+
+```{r}
+par(mfrow=c(1,1))
+best_model <- VAR(y = data.frame(export.tr, import.tr), p = 7, season = 12)
+e <- best_model$varresult$export.tr$residuals # residuals
+
+
+# Plot these
+par(mfrow=c(2,1))
+plot(r, main="Residuals vs t", ylab="")
+abline(h=0, col="red")
+
+# test whether residuals are correlated
+acf(na.omit(e), main = "ACF of Residuals")
+```
+
+The plot of the residuals indicates that the error terms have a zero mean. The ACF plot does not show any significant spikes. The model assumptions of zero mean and zero correlation are both satisfied.
+
+#### 2) Homoscedasticity
+
+```{r, fig.width=5, fig.height=4, echo =TRUE}
+par(mfrow=c(1,1))
+plot(ts(e, start = 1984, frequency = 12), main="Residuals vs t", ylab="")
+abline(v=c(1989,1994, 1999), lwd=3, col="red")
+group <- c(rep(1,57),rep(2,57),rep(3,57),rep(4,50))
+levene.test(e,group) #Levene
+bartlett.test(e,group) #Bartlett
+```
+
+The error terms look mostly homoscedastic; however, in the second partition, there seems to be lesser variance than in other regions. The Levene test and Bartlett test both reject the null hypothesis that the error terms are homoscedastic. However, we will state that the model assumption of homoscedasticity is still maintained, despite some slight departures.
+
+\newpage
+
+#### 3) Normality
+
+```{r,fig.width=4, fig.height=3}
+# Residual Diagnostics:
+qqnorm(e)
+qqline(e, col = "red")
+# test for normality
+shapiro.test(e) #SW test
+```
+
+The qqplot indicates non-normality of the error terms. The Shapiro Test rejects the null hypothesis that the residuals are normally distributed. However, since we fit the model using Vector AutoRegression (VAR) , we do not need to satisfy the assumption of normality.
+
+
+
