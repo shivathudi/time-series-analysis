@@ -1,0 +1,1 @@
+This repository contains the reports and the R Markdown code for the assignments and projects from my Time Series class at USF.
